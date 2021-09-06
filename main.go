@@ -19,6 +19,8 @@ func main()  {
 
 	defer listener.Close()
 
+	redis := lib.NewRedis()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -26,19 +28,23 @@ func main()  {
 			continue
 		}
 
-		go handler(conn)
+		go handler(conn, redis)
 	}
 }
 
 // handler 处理数据
-func handler(conn net.Conn)  {
+func handler(conn net.Conn, redis *lib.Redis)  {
 	defer conn.Close()
 	for {
-		cmd := lib.DecodeCMD(conn)
+		cmd := redis.DecodeCMD(conn)
 
 		for c := range cmd {
 			if c.Err == nil {
-				conn.Write([]byte("+OK\r\n"))
+				if c.Data == "" {
+					conn.Write([]byte("$-1\r\n"))
+				} else {
+					conn.Write([]byte("+" + c.Data +"\r\n"))
+				}
 			} else {
 				fmt.Println("异常了")
 			}

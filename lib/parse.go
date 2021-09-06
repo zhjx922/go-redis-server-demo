@@ -19,8 +19,8 @@ type Command struct {
 
 // ParseDecode 协议解析
 // 参考文章 https://www.redis.com.cn/topics/protocol.html
-func ParseDecode(reader io.Reader, ch chan<- *CMD){
-	r := bufio.NewReader(reader)
+func (r *Redis) ParseDecode(reader io.Reader, ch chan<- *CMD){
+	read := bufio.NewReader(reader)
 
 	command := &Command{MsgType: 0, Len: 0, Read: false}
 
@@ -32,19 +32,19 @@ func ParseDecode(reader io.Reader, ch chan<- *CMD){
 		//buffer没有内容了
 		if command.Read {
 			var err error
-			length, err = r.Read(buf)
+			length, err = read.Read(buf)
 			if err != nil {
 				log.Println(err)
 				return
 			}
 		}
 
-		ParseCommand(buf[:length], command, ch)
+		r.ParseCommand(buf[:length], command, ch)
 	}
 }
 
 // ParseCommand 解析一条命令
-func ParseCommand(b []byte, c *Command, ch chan<- *CMD)  {
+func (r *Redis) ParseCommand(b []byte, c *Command, ch chan<- *CMD)  {
 	c.TmpBuffer = append(c.TmpBuffer, b...)
 
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
@@ -56,17 +56,17 @@ func ParseCommand(b []byte, c *Command, ch chan<- *CMD)  {
 
 	if c.MsgType == 0 {
 		//未解析，需要解析首行
-		ParseCommandFirst(c, ch)
+		r.ParseCommandFirst(c, ch)
 	} else if c.MsgType == TypeArray {
 		//遍历数据，获取
-		ParseCommandArray(c, ch)
+		r.ParseCommandArray(c, ch)
 	} else if c.MsgType == TypeStringBulk {
 		//多行数据获取
 	}
 }
 
 // ParseCommandFirst 首行命令解析
-func ParseCommandFirst(c *Command, ch chan<- *CMD)  {
+func (r *Redis) ParseCommandFirst(c *Command, ch chan<- *CMD)  {
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
 
 	// 判断命令类型
@@ -93,11 +93,13 @@ func ParseCommandFirst(c *Command, ch chan<- *CMD)  {
 	}
 }
 
-func ParseCommandArray(c *Command, ch chan<- *CMD)  {
+func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 	read := true
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
 	value := c.TmpBuffer[1:index-1]
 	fmt.Println("array:", string(c.TmpBuffer))
+
+	// 多行字符串处理
 	if c.TmpBuffer[0] == TypeStringBulk {
 		i ,err := strconv.Atoi(string(value))
 		if err == nil {
@@ -123,6 +125,15 @@ func ParseCommandArray(c *Command, ch chan<- *CMD)  {
 			fmt.Println("数据不够，继续获取")
 		}
 	} else if c.TmpBuffer[0] == TypeString {
+		c.Argv = append(c.Argv, string(c.TmpBuffer[1:index-2]))
+
+		if len(c.TmpBuffer) == (index + 1) {
+			c.TmpBuffer = []byte{}
+		} else {
+			c.TmpBuffer = c.TmpBuffer[index+1:]
+			read = false
+			fmt.Println("剩余数据：", string(c.TmpBuffer))
+		}
 
 	} else {
 		fmt.Println("特殊情况？？")
@@ -134,6 +145,14 @@ func ParseCommandArray(c *Command, ch chan<- *CMD)  {
 		for _, v := range c.Argv {
 			fmt.Println(v)
 		}
+
+		reply := "ok"
+		if c.Argv[0] == "set" {
+			r.Set(c.Argv[1], c.Argv[2])
+		} else if c.Argv[0] == "get" {
+			reply = r.Get(c.Argv[1])
+		}
+
 		c.MsgType = 0
 		c.Len = 0
 		c.TmpBuffer = []byte{}
@@ -142,7 +161,7 @@ func ParseCommandArray(c *Command, ch chan<- *CMD)  {
 
 		//Reply
 		ch <- &CMD{
-			Data: string("ok"),
+			Data: reply,
 			Err: nil,
 		}
 	}
@@ -150,3 +169,6 @@ func ParseCommandArray(c *Command, ch chan<- *CMD)  {
 	c.Read = read
 }
 
+func ParseString() {
+
+}
