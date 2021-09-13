@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"strings"
 )
 
 type Command struct {
@@ -47,6 +48,8 @@ func (r *Redis) ParseDecode(reader io.Reader, ch chan<- *CMD){
 func (r *Redis) ParseCommand(b []byte, c *Command, ch chan<- *CMD)  {
 	c.TmpBuffer = append(c.TmpBuffer, b...)
 
+	// fmt.Println(string(c.TmpBuffer))
+
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
 	if index == -1 {
 		//数据还不够,继续读
@@ -72,12 +75,12 @@ func (r *Redis) ParseCommandFirst(c *Command, ch chan<- *CMD)  {
 	// 判断命令类型
 	c.MsgType = c.TmpBuffer[0]
 	value := c.TmpBuffer[1:index-1]
-	fmt.Println("FirstMsgValue:", string(value))
+	// fmt.Println("FirstMsgValue:", string(value))
 
 	if c.MsgType == TypeArray {
 		i ,err := strconv.Atoi(string(value))
 		if err == nil {
-			fmt.Println("数组长度:", i)
+			//fmt.Println("数组长度:", i)
 			c.Len = i
 		}
 	}
@@ -97,19 +100,19 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 	read := true
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
 	value := c.TmpBuffer[1:index-1]
-	fmt.Println("array:", string(c.TmpBuffer))
+	// fmt.Println("array:", string(c.TmpBuffer))
 
 	// 多行字符串处理
 	if c.TmpBuffer[0] == TypeStringBulk {
 		i ,err := strconv.Atoi(string(value))
 		if err == nil {
-			fmt.Println("字符串长度:", i)
+			// fmt.Println("字符串长度:", i)
 		}
 		sLength := i + index + 1 + 2
 
-		fmt.Println(len(c.TmpBuffer), sLength)
+		//fmt.Println(len(c.TmpBuffer), sLength)
 		if len(c.TmpBuffer) >= sLength {
-			fmt.Println("数据够了:", string(c.TmpBuffer[index+1:index+1+i]))
+			// fmt.Println("数据够了:", string(c.TmpBuffer[index+1:index+1+i]))
 
 			c.Argv = append(c.Argv, string(c.TmpBuffer[index+1:index+1+i]))
 
@@ -118,11 +121,11 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 			} else {
 				c.TmpBuffer = c.TmpBuffer[sLength:]
 				read = false
-				fmt.Println("剩余数据：", string(c.TmpBuffer))
+				// fmt.Println("剩余数据：", string(c.TmpBuffer))
 			}
 
 		} else {
-			fmt.Println("数据不够，继续获取")
+			// fmt.Println("数据不够，继续获取")
 		}
 	} else if c.TmpBuffer[0] == TypeString {
 		c.Argv = append(c.Argv, string(c.TmpBuffer[1:index-2]))
@@ -132,7 +135,7 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 		} else {
 			c.TmpBuffer = c.TmpBuffer[index+1:]
 			read = false
-			fmt.Println("剩余数据：", string(c.TmpBuffer))
+			// fmt.Println("剩余数据：", string(c.TmpBuffer))
 		}
 
 	} else {
@@ -142,13 +145,12 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 	if len(c.Argv) == c.Len {
 		fmt.Println("开始执行命令")
 
-		for _, v := range c.Argv {
-			fmt.Println(v)
-		}
+		reply := []byte("+ok\r\n")
 
-		reply := "ok"
+		strings.ToLower(c.Argv[0])
+
 		if c.Argv[0] == "set" {
-			r.Set(c.Argv[1], c.Argv[2])
+			reply = r.Set(c.Argv[1:])
 		} else if c.Argv[0] == "get" {
 			reply = r.Get(c.Argv[1])
 		}

@@ -11,7 +11,7 @@ func main()  {
 	fmt.Println("Redis Server Start……")
 
 	// 启动TCP Server 监听6379端口
-	listener, err := net.Listen("tcp", "127.0.0.1:6379")
+	listener, err := net.Listen("tcp", "127.0.0.1:6378")
 
 	if err != nil {
 		log.Println(err)
@@ -20,6 +20,9 @@ func main()  {
 	defer listener.Close()
 
 	redis := lib.NewRedis()
+
+	// 效率极低版
+	go redis.Ticker()
 
 	for {
 		conn, err := listener.Accept()
@@ -40,11 +43,7 @@ func handler(conn net.Conn, redis *lib.Redis)  {
 
 		for c := range cmd {
 			if c.Err == nil {
-				if c.Data == "" {
-					conn.Write([]byte("$-1\r\n"))
-				} else {
-					conn.Write([]byte("+" + c.Data +"\r\n"))
-				}
+				conn.Write(c.Data)
 			} else {
 				fmt.Println("异常了")
 			}
