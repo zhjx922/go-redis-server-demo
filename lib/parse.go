@@ -163,6 +163,14 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD) {
 			reply = r.Delete(c.Argv[1:])
 		} else if a == "exists" {
 			reply = r.Exists(c.Argv[1:])
+		} else if a == "lpush" {
+			reply = r.LPush(c.Argv[1:])
+		} else if a == "rpop" {
+			reply = r.RPop(c.Argv[1])
+		} else if a == "llen" {
+			reply = r.LLen(c.Argv[1])
+		}  else if a == "lindex" {
+			reply = r.LIndex(c.Argv[1:])
 		} else {
 			reply = []byte("+这个命令不支持~\r\n")
 		}
