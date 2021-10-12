@@ -1,7 +1,5 @@
 package lib
 
-import "container/list"
-
 const (
 	// ObjectTypeString 字符串
 	ObjectTypeString = 1
@@ -36,8 +34,4 @@ type ObjectString struct {
 
 type ObjectInt struct {
 	Data int
-}
-
-type ObjectList struct {
-	list.List
 }

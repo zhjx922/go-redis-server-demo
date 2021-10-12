@@ -290,17 +290,24 @@ func (r *Redis) Delete(args []string) []byte {
 }
 
 func (r *Redis) LPush(args []string) []byte {
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
+
 	key := args[0]
+	var l *list.List
+	// 判断key是否存在
 	if v, ok := r.Keys[key]; ok {
 		if v.(Object).Type != ObjectTypeList {
 			return ReplyError("ERR 这个key不是List类型")
 		}
-		//v.(Object).Data.(ObjectList).Front()
-		//(ObjectString)
+
+		l = v.(Object).Data.(*list.List)
+	} else {
+		//不存在，初始化
+		l = list.New()
 	}
 
 	//不存在，初始化
-	l := list.New()
 	for _, v := range args[1:] {
 		d := ObjectString{Data: v}
 		l.PushFront(d)
@@ -308,18 +315,80 @@ func (r *Redis) LPush(args []string) []byte {
 
 	ob := Object{Type: ObjectTypeList, Encoding: EncodingString, Data: l}
 	r.Keys[key] = ob
-	len := len(args[1:])
-	return ReplyIntegers(strconv.Itoa(len))
+
+	return ReplyIntegers(strconv.Itoa(l.Len()))
 }
 
-func (r *Redis) RPop() {
+func (r *Redis) RPop(key string) []byte {
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
 
+	if v, ok := r.Keys[key]; ok {
+		if v.(Object).Type != ObjectTypeList {
+			return ReplyError("ERR 这个key不是List类型")
+		}
+
+		l := v.(Object).Data.(*list.List)
+
+		if i := l.Back(); i != nil {
+			//有值
+			l.Remove(i)
+			if l.Len() == 0 {
+				delete(r.Keys, key)
+				delete(r.Expires, key)
+			}
+
+			return ReplyString(i.Value.(ObjectString).Data)
+		}
+	}
+
+	return ReplyEmptyString()
 }
 
-func (r *Redis) LLen() {
+func (r *Redis) LLen(key string) []byte {
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
 
+	if v, ok := r.Keys[key]; ok {
+		if v.(Object).Type != ObjectTypeList {
+			return ReplyError("ERR 这个key不是List类型")
+		}
+
+		return ReplyIntegers(strconv.Itoa(v.(Object).Data.(*list.List).Len()))
+	}
+
+	return ReplyEmptyString()
 }
 
-func (r *Redis) LIndex() {
+func (r *Redis) LIndex(args []string) []byte {
+	if len(args) < 2 {
+		return ReplyError("ERR wrong number of arguments for 'lindex' command")
+	}
 
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
+
+	key := args[0]
+	if v, ok := r.Keys[key]; ok {
+		if v.(Object).Type != ObjectTypeList {
+			return ReplyError("ERR 这个key不是List类型")
+		}
+
+		index, err := strconv.Atoi(args[1])
+
+		if err != nil {
+			return ReplyError("ERR 参数好像不太对")
+		}
+
+		l := v.(Object).Data.(*list.List)
+		beginIndex := 0
+		for i := l.Front(); i != nil; i = i.Next() {
+			if beginIndex == index {
+				return ReplyString(i.Value.(ObjectString).Data)
+			}
+			beginIndex++
+		}
+	}
+
+	return ReplyEmptyString()
 }

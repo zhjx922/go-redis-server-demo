@@ -7,7 +7,7 @@
 - [x] key管理(map+lru)
 - [x] String: SET GET INCR DECR MGET
 - [x] Key: DEL EXISTS
-- [ ] List: LPUSH RPOP LLEN LINDEX
+- [x] List: LPUSH RPOP LLEN LINDEX
 - [ ] Hash: HSET HGET HGETALL HDEL
 - [ ] Set: SADD SCARD SREM SISMEMBER
 - [ ] SortedSet:ZADD ZCARD ZRANGE
