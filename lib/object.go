@@ -1,5 +1,7 @@
 package lib
 
+import "container/list"
+
 const (
 	// ObjectTypeString 字符串
 	ObjectTypeString = 1
@@ -15,7 +17,7 @@ const (
 
 const (
 	EncodingString = 1
-	EncodingInt = 2
+	EncodingInt    = 2
 )
 
 // Object 单个数据对象
@@ -37,6 +39,5 @@ type ObjectInt struct {
 }
 
 type ObjectList struct {
-	Data []string
+	list.List
 }
-

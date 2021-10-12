@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"container/list"
 	"fmt"
 	"io"
 	"strconv"
@@ -28,10 +29,6 @@ type CMD struct {
 	Err  error
 }
 
-type RedisMap struct {
-	sync.Map
-}
-
 // Redis key和expires
 type Redis struct {
 	Keys    map[string]interface{}
@@ -53,6 +50,10 @@ func (r *Redis) Ticker() {
 }
 
 func (r *Redis) KeysClear() {
+	// 加一个全局的锁
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
+
 	// 这么玩肯定会影响性能
 	for key, expire := range r.Expires {
 		if expire.(int64) < time.Now().Unix() {
@@ -219,25 +220,6 @@ func (r *Redis) Exists(args []string) []byte {
 	return ReplyIntegers(strconv.Itoa(count))
 }
 
-func (r *Redis) Delete(args []string) []byte {
-	r.Lock.Lock()
-	defer r.Lock.Unlock()
-
-	//返回删除成功的数量
-	count := 0
-
-	for _, vKey := range args {
-		// 判断key是否存在
-		if _, ok := r.Keys[vKey]; ok {
-			delete(r.Keys, vKey)
-			delete(r.Expires, vKey)
-			count++
-		}
-	}
-
-	return ReplyIntegers(strconv.Itoa(count))
-}
-
 func (r *Redis) Incr(key string) []byte {
 	r.Lock.Lock()
 	defer r.Lock.Unlock()
@@ -286,4 +268,58 @@ func (r *Redis) Decr(key string) []byte {
 	r.SetAction(key, "-1")
 
 	return ReplyIntegers("-1")
+}
+
+func (r *Redis) Delete(args []string) []byte {
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
+
+	//返回删除成功的数量
+	count := 0
+
+	for _, vKey := range args {
+		// 判断key是否存在
+		if _, ok := r.Keys[vKey]; ok {
+			delete(r.Keys, vKey)
+			delete(r.Expires, vKey)
+			count++
+		}
+	}
+
+	return ReplyIntegers(strconv.Itoa(count))
+}
+
+func (r *Redis) LPush(args []string) []byte {
+	key := args[0]
+	if v, ok := r.Keys[key]; ok {
+		if v.(Object).Type != ObjectTypeList {
+			return ReplyError("ERR 这个key不是List类型")
+		}
+		//v.(Object).Data.(ObjectList).Front()
+		//(ObjectString)
+	}
+
+	//不存在，初始化
+	l := list.New()
+	for _, v := range args[1:] {
+		d := ObjectString{Data: v}
+		l.PushFront(d)
+	}
+
+	ob := Object{Type: ObjectTypeList, Encoding: EncodingString, Data: l}
+	r.Keys[key] = ob
+	len := len(args[1:])
+	return ReplyIntegers(strconv.Itoa(len))
+}
+
+func (r *Redis) RPop() {
+
+}
+
+func (r *Redis) LLen() {
+
+}
+
+func (r *Redis) LIndex() {
+
 }
