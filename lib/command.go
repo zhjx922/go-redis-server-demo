@@ -23,9 +23,9 @@ const (
 	TypeArray byte = '*'
 )
 
-type CMD struct{
+type CMD struct {
 	Data []byte
-	Err error
+	Err  error
 }
 
 type RedisMap struct {
@@ -34,16 +34,16 @@ type RedisMap struct {
 
 // Redis key和expires
 type Redis struct {
-	Keys RedisMap
-	Expires RedisMap
-	Lock sync.Mutex
+	Keys    map[string]interface{}
+	Expires map[string]interface{}
+	Lock    sync.RWMutex
 }
 
 func NewRedis() *Redis {
-	return &Redis{}
+	return &Redis{Keys: make(map[string]interface{}), Expires: make(map[string]interface{})}
 }
 
-func (r *Redis) Ticker()  {
+func (r *Redis) Ticker() {
 	time := time.NewTicker(1 * time.Minute)
 
 	select {
@@ -54,27 +54,51 @@ func (r *Redis) Ticker()  {
 
 func (r *Redis) KeysClear() {
 	// 这么玩肯定会影响性能
-	r.Expires.Range(func(key, expire interface{}) bool {
+	for key, expire := range r.Expires {
 		if expire.(int64) < time.Now().Unix() {
 			// 数据已过期
-			r.Keys.Delete(key)
-			r.Expires.Delete(key)
+			delete(r.Keys, key)
+			delete(r.Expires, key)
+			//r.Keys.Delete(key)
+			//r.Expires.Delete(key)
 			fmt.Println("数据过期，删除")
 		}
-		return true
-	})
+	}
+	/*
+		r.Expires.Range(func(key, expire interface{}) bool {
+			if expire.(int64) < time.Now().Unix() {
+				// 数据已过期
+				r.Keys.Delete(key)
+				r.Expires.Delete(key)
+				fmt.Println("数据过期，删除")
+			}
+			return true
+		})
+	*/
 }
 
-func (r *Redis) DecodeCMD(reader io.Reader) <-chan *CMD  {
+func (r *Redis) DecodeCMD(reader io.Reader) <-chan *CMD {
 	ch := make(chan *CMD)
 	go r.ParseDecode(reader, ch)
 	return ch
 }
 
-func (r *Redis) Set(args []string) []byte  {
+func (r *Redis) SetAction(key, value string) bool {
+	d := ObjectString{Data: value}
+	ob := Object{Type: ObjectTypeString, Encoding: EncodingString, Data: d}
+	r.Keys[key] = ob
+
+	return true
+}
+
+func (r *Redis) Set(args []string) []byte {
 	if len(args) < 2 {
 		return ReplyError("ERR wrong number of arguments for 'set' command")
 	}
+
+	// 加一个全局的锁
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
 
 	key := args[0]
 	value := args[1]
@@ -84,6 +108,7 @@ func (r *Redis) Set(args []string) []byte  {
 
 	ex := false
 	nx := false
+	var expire int64 = 0
 
 	if l > 2 {
 		for i := 2; i < l; i++ {
@@ -91,8 +116,7 @@ func (r *Redis) Set(args []string) []byte  {
 			if a == "EX" {
 				// 过期时间处理
 				// fmt.Println("ttl:", args[i+1])
-				expire, _ := strconv.ParseInt(args[i+1], 10, 64)
-				r.Expires.Store(key, time.Now().Unix() + expire)
+				expire, _ = strconv.ParseInt(args[i+1], 10, 64)
 				ex = true
 				i++
 			} else if a == "NX" {
@@ -105,9 +129,6 @@ func (r *Redis) Set(args []string) []byte  {
 	}
 
 	if nx {
-		// 加一个全局的锁
-		r.Lock.Lock()
-		defer r.Lock.Unlock()
 
 		//存在直接返回nil
 		if _, ok := r.GetAction(key); ok {
@@ -117,41 +138,152 @@ func (r *Redis) Set(args []string) []byte  {
 
 	}
 
-	d := ObjectString{Data: value}
-	ob := Object{Type: ObjectTypeString, Encoding: EncodingString, Data: d}
-	r.Keys.Store(key, ob)
-
-	if !ex {
-		r.Expires.Delete(key)
+	if expire > 0 {
+		r.Expires[key] = time.Now().Unix() + expire
 	}
 
-	return ReplyString("ok")
+	r.SetAction(key, value)
+
+	if !ex {
+		delete(r.Expires, key)
+	}
+
+	return ReplyString("OK")
 }
 
-func (r *Redis) GetAction(key string) (string, bool)  {
-	expire, ok := r.Expires.Load(key)
+func (r *Redis) GetAction(key string) (string, bool) {
 
-	if ok {
+	if expire, ok := r.Expires[key]; ok {
 		if expire.(int64) < time.Now().Unix() {
 			// 数据已过期
-			r.Keys.Delete(key)
-			r.Expires.Delete(key)
+			delete(r.Keys, key)
+			delete(r.Expires, key)
 			return "", false
 		}
 	}
 
-	if v, ok := r.Keys.Load(key); ok {
+	if v, ok := r.Keys[key]; ok {
 		return v.(Object).Data.(ObjectString).Data, true
 	}
 
 	return "", false
 }
 
-func (r *Redis) Get(key string) []byte  {
+func (r *Redis) Get(key string) []byte {
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
 
 	if v, ok := r.GetAction(key); ok {
 		return ReplyString(v)
 	}
 
 	return ReplyEmptyString()
+}
+
+func (r *Redis) MGet(args []string) []byte {
+	aLength := len(args)
+	if aLength < 1 {
+		return ReplyError("ERR wrong number of arguments for 'mget' command")
+	}
+
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
+
+	a := make([][]byte, aLength)
+
+	for k, vKey := range args {
+		if v, ok := r.GetAction(vKey); ok {
+			a[k] = ReplyString(v)
+		} else {
+			a[k] = ReplyEmptyString()
+		}
+
+	}
+
+	return ReplyArrays(a)
+}
+
+func (r *Redis) Exists(args []string) []byte {
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
+
+	//返回删除成功的数量
+	count := 0
+	for _, vKey := range args {
+		// 判断key是否存在
+		if _, ok := r.Keys[vKey]; ok {
+			count++
+		}
+	}
+
+	return ReplyIntegers(strconv.Itoa(count))
+}
+
+func (r *Redis) Delete(args []string) []byte {
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
+
+	//返回删除成功的数量
+	count := 0
+
+	for _, vKey := range args {
+		// 判断key是否存在
+		if _, ok := r.Keys[vKey]; ok {
+			delete(r.Keys, vKey)
+			delete(r.Expires, vKey)
+			count++
+		}
+	}
+
+	return ReplyIntegers(strconv.Itoa(count))
+}
+
+func (r *Redis) Incr(key string) []byte {
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
+
+	//存在+1
+	if v, ok := r.GetAction(key); ok {
+		fmt.Println("存在")
+
+		val, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return ReplyError("ERR 值好像不是整形哦~")
+		}
+
+		val++
+		valString := strconv.FormatInt(val, 10)
+		r.SetAction(key, valString)
+
+		return ReplyIntegers(valString)
+	}
+
+	r.SetAction(key, "1")
+
+	return ReplyIntegers("1")
+}
+
+func (r *Redis) Decr(key string) []byte {
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
+
+	//存在-1
+	if v, ok := r.GetAction(key); ok {
+		fmt.Println("存在")
+
+		val, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return ReplyError("ERR 值好像不是整形哦~")
+		}
+
+		val--
+		valString := strconv.FormatInt(val, 10)
+		r.SetAction(key, valString)
+
+		return ReplyIntegers(valString)
+	}
+
+	r.SetAction(key, "-1")
+
+	return ReplyIntegers("-1")
 }

@@ -12,15 +12,15 @@ import (
 
 type Command struct {
 	TmpBuffer []byte
-	MsgType byte //*,$,+,-,:
-	Len int //数组长度or字符串长度
-	Read bool //是否继续read
-	Argv []string //参数数据
+	MsgType   byte     //*,$,+,-,:
+	Len       int      //数组长度or字符串长度
+	Read      bool     //是否继续read
+	Argv      []string //参数数据
 }
 
 // ParseDecode 协议解析
 // 参考文章 https://www.redis.com.cn/topics/protocol.html
-func (r *Redis) ParseDecode(reader io.Reader, ch chan<- *CMD){
+func (r *Redis) ParseDecode(reader io.Reader, ch chan<- *CMD) {
 	read := bufio.NewReader(reader)
 
 	command := &Command{MsgType: 0, Len: 0, Read: false}
@@ -45,7 +45,7 @@ func (r *Redis) ParseDecode(reader io.Reader, ch chan<- *CMD){
 }
 
 // ParseCommand 解析一条命令
-func (r *Redis) ParseCommand(b []byte, c *Command, ch chan<- *CMD)  {
+func (r *Redis) ParseCommand(b []byte, c *Command, ch chan<- *CMD) {
 	c.TmpBuffer = append(c.TmpBuffer, b...)
 
 	// fmt.Println(string(c.TmpBuffer))
@@ -69,16 +69,16 @@ func (r *Redis) ParseCommand(b []byte, c *Command, ch chan<- *CMD)  {
 }
 
 // ParseCommandFirst 首行命令解析
-func (r *Redis) ParseCommandFirst(c *Command, ch chan<- *CMD)  {
+func (r *Redis) ParseCommandFirst(c *Command, ch chan<- *CMD) {
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
 
 	// 判断命令类型
 	c.MsgType = c.TmpBuffer[0]
-	value := c.TmpBuffer[1:index-1]
+	value := c.TmpBuffer[1 : index-1]
 	// fmt.Println("FirstMsgValue:", string(value))
 
 	if c.MsgType == TypeArray {
-		i ,err := strconv.Atoi(string(value))
+		i, err := strconv.Atoi(string(value))
 		if err == nil {
 			//fmt.Println("数组长度:", i)
 			c.Len = i
@@ -96,15 +96,15 @@ func (r *Redis) ParseCommandFirst(c *Command, ch chan<- *CMD)  {
 	}
 }
 
-func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
+func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD) {
 	read := true
 	index := bytes.IndexByte(c.TmpBuffer, '\n')
-	value := c.TmpBuffer[1:index-1]
+	value := c.TmpBuffer[1 : index-1]
 	// fmt.Println("array:", string(c.TmpBuffer))
 
 	// 多行字符串处理
 	if c.TmpBuffer[0] == TypeStringBulk {
-		i ,err := strconv.Atoi(string(value))
+		i, err := strconv.Atoi(string(value))
 		if err == nil {
 			// fmt.Println("字符串长度:", i)
 		}
@@ -145,16 +145,29 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 	if len(c.Argv) == c.Len {
 		fmt.Println("开始执行命令")
 
-		reply := []byte("+ok\r\n")
+		reply := []byte("+OK\r\n")
 
-		strings.ToLower(c.Argv[0])
+		a := strings.ToLower(c.Argv[0])
 
-		if c.Argv[0] == "set" {
+		if a == "set" {
 			reply = r.Set(c.Argv[1:])
-		} else if c.Argv[0] == "get" {
+		} else if a == "get" {
 			reply = r.Get(c.Argv[1])
+		} else if a == "incr" {
+			reply = r.Incr(c.Argv[1])
+		} else if a == "decr" {
+			reply = r.Decr(c.Argv[1])
+		} else if a == "mget" {
+			reply = r.MGet(c.Argv[1:])
+		} else if a == "del" {
+			reply = r.Delete(c.Argv[1:])
+		} else if a == "exists" {
+			reply = r.Exists(c.Argv[1:])
+		} else {
+			reply = []byte("+这个命令不支持~\r\n")
 		}
 
+		//reset
 		c.MsgType = 0
 		c.Len = 0
 		c.TmpBuffer = []byte{}
@@ -164,13 +177,9 @@ func (r *Redis) ParseCommandArray(c *Command, ch chan<- *CMD)  {
 		//Reply
 		ch <- &CMD{
 			Data: reply,
-			Err: nil,
+			Err:  nil,
 		}
 	}
 
 	c.Read = read
-}
-
-func ParseString() {
-
 }
